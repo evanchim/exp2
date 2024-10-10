@@ -1,0 +1,295 @@
+---
+title: "consumo e2"
+author: "Evangelina Miqueo"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup global del informe, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      warning = FALSE, 
+                      messages = FALSE)
+```
+
+```{r paquetes}
+pacman::p_load(tidyverse, janitor, rio, 
+               emmeans, multcomp,lme4, nlme)
+pacman::p_load( car)
+pacman::p_load(influence.ME)
+pacman::p_load(multcompView)
+conflicted::conflict_prefer("select", "dplyr")
+conflicted::conflict_prefer("filter", "dplyr")
+conflicted::conflicts_prefer(janitor::chisq.test)
+conflicted::conflicts_prefer(janitor::fisher.test)
+```   
+#Starter intake
+```{r}
+url_starter <- "https://docs.google.com/spreadsheets/d/1CAuOrd5P78WMGR5CNg9xNOcsN5Ys-EoXudK4ExXZM9E/edit?gid=0#gid=0"
+
+raw <- rio::import(url_starter) %>% 
+ drop_na() %>% 
+  clean_names()
+head(raw)
+```
+
+
+
+```{r}
+raw %>% 
+  pivot_longer(cols=c(x7,x14,x21,x28,x35,x42,x49,x56,x63),
+               names_to = "week", 
+               values_to = "starter_intake", 
+               names_prefix = "x") -> long
+long
+long$week<-as.numeric(long$week)
+long$grupo<-as.factor(long$grupo)
+long$sexo<-as.factor(long$sexo)
+long$vc_vq<-as.factor(long$vc_vq)
+head(long)
+```
+
+
+```{r}
+ggplot(long, aes(x=week, y=starter_intake, col=grupo)) + 
+  facet_wrap(~grupo+id_ternero, labeller = label_wrap_gen(multi_line=FALSE)) +
+  geom_line() + 
+  theme_classic()
+```
+
+```{r}
+control_params <- lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000))
+modelo<-lmer((sqrt(starter_intake)) ~ week * grupo + I(week^2) + I(week^3) + sexo + (1|vc_vq) + 
+  (1 + week | id_ternero),
+  data = long, control = control_params)
+```
+```{r}
+# Extract residuals
+resid_modelo <- residuals(modelo)
+
+# Q-Q plot
+qqnorm(resid_modelo)
+```
+```{r}
+shapiro.test(resid_modelo)
+```
+```{r}
+# Extract fitted values
+fitted_modelo <- fitted(modelo)
+
+# Plot residuals vs. fitted values
+plot(fitted_modelo, resid_modelo,
+     xlab = "Fitted values", ylab = "Residuals", 
+     main = "Residuals vs Fitted")
+
+```
+```{r}
+leveneTest(resid_modelo ~ long$grupo)
+```
+```{r}
+car::Anova(modelo)
+```
+```{r}
+emmeans_sqrt <- emmeans(modelo, ~ grupo)
+
+# Back-transform the emmeans by squaring the estimates
+emmeans_back <- summary(emmeans_sqrt, type = "response")
+emmeans_back$response <- emmeans_back$response^2
+emmeans_back$lower.CL <- emmeans_back$lower.CL^2
+emmeans_back$upper.CL <- emmeans_back$upper.CL^2
+
+# Display the back-transformed results
+print(emmeans_back)
+
+```
+
+
+
+
+
+##Scaled week
+```{r}
+long$week_scaled <- scale(long$week)
+fit <- lmer(
+  (sqrt(starter_intake)) ~ week_scaled * grupo + I(week_scaled^2) + I(week_scaled^3) + 
+  I(week_scaled^4) + I(week_scaled^5) + I(week_scaled^6) + 
+  I(week_scaled^7) + I(week_scaled^8) + sexo + (1|vc_vq) + 
+  (1 + week_scaled | id_ternero),
+  data = long)
+plot(fit)
+```
+```{r}
+# Extract residuals
+resid_fit <- residuals(fit)
+
+# Q-Q plot
+qqnorm(resid_fit)
+```
+```{r}
+shapiro.test(resid_fit)
+```
+```{r}
+# Extract fitted values
+fitted_fit <- fitted(fit)
+
+# Plot residuals vs. fitted values
+plot(fitted_fit, resid_fit,
+     xlab = "Fitted values", ylab = "Residuals", 
+     main = "Residuals vs Fitted")
+
+```
+```{r}
+leveneTest(resid_fit ~ t_long$grupo)
+```
+```{r}
+car::Anova(fit)
+```
+```{r}
+# Obtain emmeans on the sqrt-transformed scale
+emmeans_sqrt <- emmeans(fit, ~ grupo)
+
+# Back-transform the emmeans by squaring the estimates
+emmeans_back <- summary(emmeans_sqrt, type = "response")
+emmeans_back$response <- emmeans_back$response^2
+emmeans_back$lower.CL <- emmeans_back$lower.CL^2
+emmeans_back$upper.CL <- emmeans_back$upper.CL^2
+
+# Display the back-transformed results
+print(emmeans_back)
+
+```
+##Sin escalar week
+```{r}
+# Check for zero, negative, or missing values in starter_intake
+summary(long$starter_intake)
+# Filter out rows where starter_intake is zero or missing
+long_filtered <- long[!is.na(long$starter_intake) & long$starter_intake > 0, ]
+```
+
+
+```{r}
+si <- lmer( (1/(starter_intake)) ~ week * grupo + I(week^2) + I(week^3) + I(week^4) +
+  I(week^5) + I(week^6) + I(week^7) + I(week^8) + sexo +  (1 | vc_vq) + (1 | id_ternero),
+  data = long_filtered)
+conc<-lme(sqrt(starter_intake)~grupo*week*I(week^2)+sexo,(rand=~1|vc_vq/id_ternero), data=long)
+concsplines<-lme(sqrt(starter_intake)~grupo*ns(week, df = 4)+sexo,(rand=~1|vc_vq/id_ternero), data=long)
+concsplines1<-lme(sqrt(starter_intake)~grupo*ns(week, df = 5)+sexo,(rand=~1|vc_vq/id_ternero), data=long)
+concsplines2<-lme(sqrt(starter_intake)~grupo*ns(week, df = 6)+sexo,(rand=~1|vc_vq/id_ternero), data=long)
+concspline3s<-lme(sqrt(starter_intake)~grupo*ns(week, df = 7)+sexo,(rand=~1|vc_vq/id_ternero), data=long)
+concentrado1 <- lme(sqrt(starter_intake) ~ grupo * poly(week, 8) + sexo , (rand=~1|vc_vq/id_ternero), data=long)
+```
+
+
+```{r}
+compare_performance(conc, concsplines, concsplines1, concsplines2, concspline3s, concentrado1, si)
+```
+
+```{r}
+plot(concspline3s)
+```
+```{r}
+# Extract residuals
+resid_concspline3s <- residuals(concspline3s)
+
+# Q-Q plot
+qqnorm(resid_concspline3s)
+```
+```{r}
+shapiro.test(resid_concspline3s)
+
+```
+```{r}
+# Extract fitted values
+fitted_concspline3s<- fitted(concspline3s)
+
+# Plot residuals vs. fitted values
+plot(fitted_concspline3s, resid_concspline3s,
+     xlab = "Fitted values", ylab = "Residuals", 
+     main = "Residuals vs Fitted")
+
+```
+```{r}
+leveneTest(resid_concspline3s ~ long$grupo)
+```
+
+
+#Total intake 
+
+```{r}
+total_url<-"https://docs.google.com/spreadsheets/d/1Z9JLPiEP9ZcKQXPYBxfEryDeobNbyKcpCMQnzvQnegI/edit?gid=0#gid=0"
+total<-rio::import(total_url) %>% 
+  drop_na()
+total$grupo<-as.factor(total$grupo)
+total$sexo<-as.factor(total$sexo)
+total$madre<-as.factor(total$madre)
+head(total)
+```
+```{r}
+total %>% 
+  pivot_longer(cols=c(s_7:s_63),
+               names_to = "week", 
+               values_to = "total_intake", 
+               names_prefix = "s_") -> t_long
+t_long$week<-as.numeric(t_long$week)
+t_long
+```
+```{r}
+ggplot(t_long, aes(x=week, total_intake, col=grupo)) + 
+  facet_wrap(~grupo+id, labeller = label_wrap_gen(multi_line=FALSE)) +
+  geom_line() + 
+  theme_classic()
+```
+```{r}
+t_long$week_scaled <- scale(t_long$week)
+fit2 <- lmer(
+  (1/(total_intake)) ~ week_scaled * grupo + I(week_scaled^2) + I(week_scaled^3) + 
+  I(week_scaled^4) + I(week_scaled^5) + I(week_scaled^6) + 
+  I(week_scaled^7) + I(week_scaled^8) + sexo + (1|madre) + 
+  (1 + week_scaled | id)+ (1|estacion),
+  data = t_long)
+plot(fit2)
+```
+```{r}
+# Extract residuals
+resid_fit2 <- residuals(fit2)
+
+# Q-Q plot
+qqnorm(resid_fit2)
+```
+```{r}
+shapiro.test(resid_fit2)
+
+```
+```{r}
+# Extract fitted values
+fitted_fit2 <- fitted(fit2)
+
+# Plot residuals vs. fitted values
+plot(fitted_fit2, resid_fit2,
+     xlab = "Fitted values", ylab = "Residuals", 
+     main = "Residuals vs Fitted")
+
+```
+```{r}
+leveneTest(resid_fit2 ~ t_long$grupo)
+```
+```{r}
+car::Anova(fit2)
+```
+```{r}
+# Obtain emmeans without specifying the transformation
+consumo <- emmeans(fit2, ~ grupo)
+
+# Back-transform the estimates to the original scale by applying 1 / response
+consumo_back <- summary(consumo, type = "response")
+consumo_back$response <- 1 / consumo_back$response
+consumo_back$lower.CL <- 1 / consumo_back$lower.CL
+consumo_back$upper.CL <- 1 / consumo_back$upper.CL
+
+# Display the back-transformed results
+print(consumo_back)
+```
+
+
